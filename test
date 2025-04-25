@@ -1,0 +1,43 @@
+package com.hashedin.SocioApp.login.controllers;
+
+import com.hashedin.SocioApp.login.payload.response.MessageResponse;
+import com.hashedin.SocioApp.login.security.services.PostService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Optional;
+
+@RestController
+@RequestMapping("/api/posts")
+public class PostController {
+
+    @Autowired
+    private PostService postService;
+
+    @PostMapping
+    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
+    public ResponseEntity<?> createPost(@RequestBody PostRequest postRequest) {
+        return ResponseEntity.ok(postService.createPost(postRequest));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
+    public ResponseEntity<?> updatePost(@PathVariable Long id, @RequestBody PostRequest postRequest) {
+        return ResponseEntity.ok(postService.updatePost(id, postRequest));
+    }
+
+    @GetMapping("/user/{userId}")
+    public ResponseEntity<?> getAllPostsByUser(@PathVariable Long userId,
+                                               @RequestParam Optional<String> search) {
+        return ResponseEntity.ok(postService.getAllPostsByUser(userId, search));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
+    public ResponseEntity<?> deletePost(@PathVariable Long id) {
+        postService.deletePost(id);
+        return ResponseEntity.ok(new MessageResponse("Post deleted successfully!"));
+    }
+}
