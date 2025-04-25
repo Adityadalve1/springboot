@@ -1,43 +1,137 @@
 package com.hashedin.SocioApp.login.controllers;
 
-import com.hashedin.SocioApp.login.payload.response.MessageResponse;
-import com.hashedin.SocioApp.login.security.services.PostService;
+import com.hashedin.SocioApp.login.models.*;
+import com.hashedin.SocioApp.login.repository.*;
+import com.hashedin.SocioApp.login.security.services.UserDetailsImpl;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Optional;
+import java.util.*;
 
 @RestController
-@RequestMapping("/api/posts")
-public class PostController {
+@RequestMapping("/api/interactions")
+public class InteractionController {
 
     @Autowired
-    private PostService postService;
+    private UserRepository userRepository;
 
-    @PostMapping
-    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
-    public ResponseEntity<?> createPost(@RequestBody PostRequest postRequest) {
-        return ResponseEntity.ok(postService.createPost(postRequest));
+    @Autowired
+    private PostRepository postRepository;
+
+    @Autowired
+    private CommentRepository commentRepository;
+
+    @Autowired
+    private LikeRepository likeRepository;
+
+    @Autowired
+    private ShareRepository shareRepository;
+
+    @Autowired
+    private ReportRepository reportRepository;
+
+    private User getCurrentUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String username = ((UserDetailsImpl) auth.getPrincipal()).getUsername();
+        return userRepository.findByUsername(username).orElseThrow(() -> new RuntimeException("User not found"));
     }
 
-    @PutMapping("/{id}")
-    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
-    public ResponseEntity<?> updatePost(@PathVariable Long id, @RequestBody PostRequest postRequest) {
-        return ResponseEntity.ok(postService.updatePost(id, postRequest));
+    // 🔁 Follow / Unfollow
+    @PostMapping("/follow/{userId}")
+    public ResponseEntity<?> followUnfollowUser(@PathVariable Long userId) {
+        User currentUser = getCurrentUser();
+        User targetUser = userRepository.findById(userId).orElseThrow(() -> new RuntimeException("User not found"));
+
+        if (currentUser.getId().equals(targetUser.getId())) {
+            return ResponseEntity.badRequest().body("You cannot follow/unfollow yourself.");
+        }
+
+        if (currentUser.getFollowing().contains(targetUser)) {
+            currentUser.getFollowing().remove(targetUser);
+            userRepository.save(currentUser);
+            return ResponseEntity.ok("Unfollowed user.");
+        } else {
+            currentUser.getFollowing().add(targetUser);
+            userRepository.save(currentUser);
+            return ResponseEntity.ok("Followed user.");
+        }
     }
 
-    @GetMapping("/user/{userId}")
-    public ResponseEntity<?> getAllPostsByUser(@PathVariable Long userId,
-                                               @RequestParam Optional<String> search) {
-        return ResponseEntity.ok(postService.getAllPostsByUser(userId, search));
+    // 💬 Comment
+    @PostMapping("/comment/{postId}")
+    public ResponseEntity<?> commentOnPost(@PathVariable Long postId, @RequestBody Map<String, String> body) {
+        User user = getCurrentUser();
+        Post post = postRepository.findById(postId).orElseThrow(() -> new RuntimeException("Post not found"));
+
+        Comment comment = new Comment();
+        comment.setContent(body.get("content"));
+        comment.setUser(user);
+        comment.setPost(post);
+        comment.setCreatedAt(new Date());
+        commentRepository.save(comment);
+
+        return ResponseEntity.ok("Comment added.");
     }
 
-    @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('USER') or hasRole('ADMIN')")
-    public ResponseEntity<?> deletePost(@PathVariable Long id) {
-        postService.deletePost(id);
-        return ResponseEntity.ok(new MessageResponse("Post deleted successfully!"));
+    // ❤️ Like / Unlike
+    @PostMapping("/like/{postId}")
+    public ResponseEntity<?> likeUnlikePost(@PathVariable Long postId) {
+        User user = getCurrentUser();
+        Post post = postRepository.findById(postId).orElseThrow(() -> new RuntimeException("Post not found"));
+
+        Optional<Like> existingLike = likeRepository.findByUserAndPost(user, post);
+        if (existingLike.isPresent()) {
+            likeRepository.delete(existingLike.get());
+            return ResponseEntity.ok("Post unliked.");
+        } else {
+            Like like = new Like();
+            like.setUser(user);
+            like.setPost(post);
+            like.setLikedAt(new Date());
+            likeRepository.save(like);
+            return ResponseEntity.ok("Post liked.");
+        }
+    }
+
+    // 🔄 Share Post
+    @PostMapping("/share/{postId}")
+    public ResponseEntity<?> sharePost(@PathVariable Long postId) {
+        User user = getCurrentUser();
+        Post originalPost = postRepository.findById(postId).orElseThrow(() -> new RuntimeException("Original post not found"));
+
+        Post sharedPost = new Post();
+        sharedPost.setUser(user);
+        sharedPost.setContent("Shared from @" + originalPost.getUser().getUsername() + ": " + originalPost.getContent());
+        sharedPost.setCreatedAt(new Date());
+        sharedPost.setOriginalPostUrl("/posts/" + originalPost.getId());
+        postRepository.save(sharedPost);
+
+        Share share = new Share();
+        share.setUser(user);
+        share.setOriginalPost(originalPost);
+        share.setSharedPost(sharedPost);
+        share.setSharedAt(new Date());
+        shareRepository.save(share);
+
+        return ResponseEntity.ok("Post shared.");
+    }
+
+    // 🚨 Report Post
+    @PostMapping("/report/{postId}")
+    public ResponseEntity<?> reportPost(@PathVariable Long postId, @RequestBody Map<String, String> body) {
+        User reporter = getCurrentUser();
+        Post post = postRepository.findById(postId).orElseThrow(() -> new RuntimeException("Post not found"));
+
+        Report report = new Report();
+        report.setReporter(reporter);
+        report.setPost(post);
+        report.setReason(body.get("reason"));
+        reportRepository.save(report);
+
+        return ResponseEntity.ok("Post reported.");
     }
 }
